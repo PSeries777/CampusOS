@@ -1,7 +1,8 @@
-import { cp, mkdir } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 
 const copy = pathToFileURL(resolve('tests/.backend') + '/');
@@ -14,6 +15,11 @@ if (process.argv.includes('--prepare')) {
     await cp(new URL(file, original), new URL(file, copy), { recursive: true });
   }
 }
+
+export const samplePdf = () =>
+  createRequire(new URL('package.json', original))(
+    './tests/document-fixtures.js',
+  ).pdf;
 
 export const testAccounts = {
   teacher: {
@@ -73,9 +79,11 @@ export async function createBackend() {
       'INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)',
     ).run(student.id, course);
   }
+  const uploadDir = await mkdtemp(join(tmpdir(), 'campusos-documents-'));
   const app = buildApp({
     db,
     config: {
+      uploadDir,
       nodeEnv: 'test',
       isProduction: false,
       logLevel: 'silent',
@@ -85,6 +93,7 @@ export async function createBackend() {
   });
   app.addHook('onClose', async () => {
     db.close();
+    await rm(uploadDir, { recursive: true, force: true });
   });
   await app.ready();
   return { app, accounts, course };

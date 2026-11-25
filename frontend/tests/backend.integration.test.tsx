@@ -12,12 +12,17 @@ import {
 import { MemoryRouter } from 'react-router-dom';
 import App from '../src/App';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { documents } from '../src/documents';
 import { api } from '../src/services';
 import { fingerprint, saveAuth } from '../src/storage';
 
 interface Fixture {
   app: {
-    inject: (request: object) => Promise<{ body: string; statusCode: number }>;
+    inject: (request: object) => Promise<{
+      rawPayload: Buffer;
+      statusCode: number;
+      headers: Record<string, string>;
+    }>;
     close: () => Promise<void>;
   };
   accounts: Record<
@@ -30,20 +35,61 @@ vi.hoisted(() => vi.stubEnv('VITE_USE_MOCKS', 'false'));
 let fixture: Fixture;
 const fixturePath = pathToFileURL(resolve('tests/backend-fixture.mjs')).href;
 
+function blobBytes(blob: Blob) {
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
 beforeEach(async () => {
   const { createBackend } = await import(/* @vite-ignore */ fixturePath);
   fixture = await createBackend();
   vi.stubGlobal('fetch', async (path: string, init: RequestInit) => {
+    const headers = new Headers(init.headers);
+    let payload: RequestInit['body'] | Buffer = init.body;
+    if (init.body instanceof FormData) {
+      const boundary = 'campusos-documents-test';
+      const parts: Buffer[] = [];
+      for (const [name, value] of init.body) {
+        const disposition =
+          '--' +
+          boundary +
+          '\r\nContent-Disposition: form-data; name="' +
+          name +
+          '"';
+        if (typeof value === 'string')
+          parts.push(Buffer.from(disposition + '\r\n\r\n' + value + '\r\n'));
+        else
+          parts.push(
+            Buffer.from(
+              disposition + '; filename="' + value.name + '"\r\n\r\n',
+            ),
+            Buffer.from(await blobBytes(value)),
+            Buffer.from('\r\n'),
+          );
+      }
+      headers.set('Content-Type', 'multipart/form-data; boundary=' + boundary);
+      payload = Buffer.concat([
+        ...parts,
+        Buffer.from('--' + boundary + '--\r\n'),
+      ]);
+    }
     const response = await fixture.app.inject({
       method: init.method,
       url: path,
-      headers: Object.fromEntries(new Headers(init.headers).entries()),
-      payload: init.body ?? undefined,
+      headers: Object.fromEntries(headers.entries()),
+      payload: payload ?? undefined,
     });
-    return new Response(response.body, {
-      status: response.statusCode,
-      headers: { 'content-type': 'application/json' },
-    });
+    return new Response(
+      response.statusCode === 204 ? null : Uint8Array.from(response.rawPayload),
+      {
+        status: response.statusCode,
+        headers: response.headers,
+      },
+    );
   });
 });
 afterEach(async () => {
@@ -126,7 +172,7 @@ it('runs a live teacher and student attendance session against Fastify and SQLit
   expect((await api.courses())[0].teacher_id).toBe(accounts.teacher.id);
 });
 
-it('renders the teacher-to-student check-in flow and labels demo materials', async () => {
+it('renders the teacher-to-student check-in flow and opens real course materials', async () => {
   const { password } = await import(/* @vite-ignore */ fixturePath);
   const { accounts } = fixture;
   saveAuth(await api.login(accounts.teacher.email, password));
@@ -176,8 +222,8 @@ it('renders the teacher-to-student check-in flow and labels demo materials', asy
   await screen.findByText('Attendance recorded for CS101.');
   await screen.findByText('100.00%');
   fireEvent.click(screen.getByRole('link', { name: 'Materials' }));
-  await screen.findByText('Demo data');
-  await screen.findByText('Relational model and keys');
+  await screen.findByText('No materials for this course yet.');
+  expect(screen.queryByRole('button', { name: 'Upload material' })).toBeNull();
   closeStudent();
 
   saveAuth(await api.login(accounts.teacher.email, password));
@@ -186,4 +232,47 @@ it('renders the teacher-to-student check-in flow and labels demo materials', asy
   fireEvent.click(screen.getByRole('button', { name: 'End session' }));
   await screen.findByRole('heading', { name: 'Session results' });
   closeResults();
+
+  const closeMarks = open('/marks');
+  await screen.findByRole('heading', { name: 'Access denied' });
+  expect(screen.queryByRole('link', { name: 'Marks' })).toBeNull();
+  closeMarks();
+
+  saveAuth(await api.login(accounts.admin.email, password));
+  const closeUsers = open('/users');
+  await screen.findByRole('heading', { name: 'Access denied' });
+  expect(screen.queryByRole('link', { name: 'Users' })).toBeNull();
+  closeUsers();
 }, 15000);
+
+it('uploads, lists, downloads, updates, and deletes course documents', async () => {
+  const { password, samplePdf } = await import(/* @vite-ignore */ fixturePath);
+  const pdf = samplePdf();
+  const { accounts, course } = fixture;
+  const teacher = await api.login(accounts.teacher.email, password);
+  saveAuth(teacher);
+  const file = new File([Uint8Array.from(pdf)], 'notes.pdf', {
+    type: 'application/pdf',
+  });
+  const entry = await documents.upload(course, 'Lecture notes', '', file);
+  expect(entry.original_filename).toBe('notes.pdf');
+  expect(
+    (await documents.update(entry.id, 'Updated notes', 'Chapter 1'))
+      .description,
+  ).toBe('Chapter 1');
+
+  saveAuth(await api.login(accounts.student.email, password));
+  const page = await documents.list(course, 1);
+  expect(page.items[0].title).toBe('Updated notes');
+  expect(page.nextPage).toBeUndefined();
+  expect(Buffer.from(await blobBytes(await documents.download(entry)))).toEqual(
+    pdf,
+  );
+  await expect(documents.remove(entry.id)).rejects.toMatchObject({
+    status: 403,
+  });
+
+  saveAuth(teacher);
+  await documents.remove(entry.id);
+  expect((await documents.list(course, 1)).items).toEqual([]);
+});

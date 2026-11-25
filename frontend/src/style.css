@@ -590,3 +590,6 @@ tr:last-child td {
     background: var(--surface);
   }
 }
+
+.form-stack textarea { width: 100%; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); resize: vertical; }
+@media (max-width: 600px) { .rows .materials-row { align-items: flex-start; flex-direction: column; } }

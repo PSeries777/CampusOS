@@ -26,6 +26,7 @@ import { PageTitle } from './ui';
 const Login = lazy(() => import('./pages/Login'));
 const Student = lazy(() => import('./pages/Student'));
 const Staff = lazy(() => import('./pages/Staff'));
+const Materials = lazy(() => import('./pages/Materials'));
 const Demo = lazy(() => import('./pages/Demo'));
 
 const nav = {
@@ -39,7 +40,7 @@ const nav = {
 const byRole = {
   student: [nav.home, nav.courses, nav.attendance, nav.materials, nav.marks],
   teacher: [nav.home, nav.courses, nav.attendance, nav.materials, nav.marks],
-  admin: [nav.home, nav.courses, nav.users],
+  admin: [nav.home, nav.courses, nav.materials, nav.users],
 };
 
 export default function App() {
@@ -141,12 +142,16 @@ export default function App() {
       </header>
       <nav className="nav glass" aria-label="Main">
         <div className="nav-caption">Workspace</div>
-        {byRole[user.role].map(([to, label, Icon]) => (
-          <NavLink end key={to} to={to}>
-            <Icon size={19} />
-            <span>{label}</span>
-          </NavLink>
-        ))}
+        {byRole[user.role]
+          .filter(
+            (item) => useMocks || (item !== nav.marks && item !== nav.users),
+          )
+          .map(([to, label, Icon]) => (
+            <NavLink end key={to} to={to}>
+              <Icon size={19} />
+              <span>{label}</span>
+            </NavLink>
+          ))}
         <div className="nav-user">
           <strong>{user.full_name}</strong>
           <span>{user.role}</span>
@@ -170,17 +175,17 @@ export default function App() {
             <Route
               path="/materials"
               element={
-                user.role === 'admin' ? (
-                  deny
-                ) : (
+                useMocks ? (
                   <Demo key="materials" type="materials" role={user.role} />
+                ) : (
+                  <Materials role={user.role} />
                 )
               }
             />
             <Route
               path="/marks"
               element={
-                user.role === 'admin' ? (
+                !useMocks || user.role === 'admin' ? (
                   deny
                 ) : (
                   <Demo key="marks" type="marks" role={user.role} />
@@ -190,7 +195,7 @@ export default function App() {
             <Route
               path="/users"
               element={
-                user.role === 'admin' ? (
+                useMocks && user.role === 'admin' ? (
                   <Demo type="users" role={user.role} />
                 ) : (
                   deny
