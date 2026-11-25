@@ -17,7 +17,7 @@ const SCHEMA = {
   enrollments:         { columns: ['course_id','student_id','enrolled_at'], pk: ['course_id','student_id'] },
   attendance_sessions: { columns: ['id','course_id','otp_code','is_active','started_at','ended_at'], pk: ['id'] },
   attendance_records:  { columns: ['id','session_id','student_id','device_fingerprint','punched_at'], pk: ['id'] },
-  documents:           { columns: ['id','course_id','uploaded_by','title','description','file_path','file_size','mime_type','uploaded_at'], pk: ['id'] },
+  documents:           { columns: ['id','course_id','uploaded_by','title','description','file_path','file_size','mime_type','uploaded_at','original_filename'], pk: ['id'] },
   assessments:         { columns: ['id','course_id','title','max_marks','weightage','created_at'], pk: ['id'] },
   student_marks:       { columns: ['assessment_id','student_id','marks_obtained','feedback','updated_at'], pk: ['assessment_id','student_id'] },
 };

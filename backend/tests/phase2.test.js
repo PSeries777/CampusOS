@@ -276,9 +276,9 @@ test('supporting: JWT secret comes from configuration/environment, not source co
   const saved = { NODE_ENV: process.env.NODE_ENV, JWT_SECRET: process.env.JWT_SECRET };
   try {
     process.env.NODE_ENV = 'development';
-    process.env.JWT_SECRET = 'env-provided-secret-for-test';
+    process.env.JWT_SECRET = 'env-provided-secret-for-test-9b7c2104';
     const { config } = await import('../src/config/env.js?case=dev');
-    assert.equal(config.jwtSecret, 'env-provided-secret-for-test');
+    assert.equal(config.jwtSecret, 'env-provided-secret-for-test-9b7c2104');
 
     process.env.NODE_ENV = 'production';
     process.env.JWT_SECRET = 'too-short';

@@ -14,22 +14,45 @@ Config and the DB handle are injected into `buildApp()`, which keeps tests isola
 
 ## Install and run
     npm install
-    cp .env.example .env        # edit values
+    cp .env.example .env        # set JWT_SECRET before running commands below
     npm run db:migrate          # optional: server also migrates on startup
     npm run dev                 # development (auto-restart)
     npm start                   # production-style
     npm test
 
+Generate a fresh JWT signing secret with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` and set it as `JWT_SECRET` in `.env` or through your deployment environment. Keep `.env` private. Startup and `npm run db:migrate` require a valid secret. Changing an existing secret invalidates previously issued tokens.
+
+The server listens on `127.0.0.1` by default. To allow connections from other machines, explicitly set `HOST` to the intended interface address, or set `HOST=0.0.0.0` to listen on all IPv4 interfaces.
+
 ## Environment variables
 | Name | Default | Notes |
 |---|---|---|
-| NODE_ENV | development | `production` hides internal error messages and enforces a strong JWT_SECRET |
-| PORT / HOST | 8080 / 0.0.0.0 | |
+| NODE_ENV | development | `production` hides internal error messages |
+| PORT / HOST | 8080 / 127.0.0.1 | Set `HOST` explicitly for external access |
 | DATABASE_PATH | ./data/sms.sqlite | directory is created automatically |
-| UPLOAD_DIR | ./uploads | used from Phase 5 |
-| JWT_SECRET | CHANGE_ME | >= 32 random chars in production |
+| UPLOAD_DIR | ./uploads | Dedicated private local directory |
+| DOCUMENT_UPLOAD_CONCURRENCY | 2 | Simultaneous uploads per backend process, 1–16. Excess requests receive 429 and a `Retry-After` header. |
+| DOCUMENT_UPLOAD_TIMEOUT_MS | 120000 | Upload deadline in milliseconds, 1–900000. Timed-out uploads receive 408. |
+| DOCUMENT_ARCHIVE_MAX_ENTRIES | 1000 | Maximum ZIP or DOCX entries, 1–10000. Larger archives receive 413. |
+| JWT_SECRET | Required | At least 32 random characters in every environment |
 | JWT_EXPIRES_IN | 8h | used from Phase 2 |
 | LOG_LEVEL | info (prod) / debug | |
+
+### Document requests
+
+Send `courseId` before the file part in `POST /api/documents` so course authorization runs before staging. File-first requests remain supported and receive the same size limit and deadline.
+
+`GET /api/documents?courseId=<id>&page=1&limit=50` returns the existing metadata array in `data`. Pages start at 1, the default limit is 50, and the maximum is 100. Follow `X-Next-Page` when present. The final page has no next-page header. A page beyond the end returns an empty array.
+
+Run **one backend instance** per database and upload directory, including during restarts. Concurrent delete requests for one document return 204 for the first successful deletion and 404 after its row is gone. DELETE also removes stale metadata when the file is already missing.
+
+Keep `DATABASE_PATH` outside `UPLOAD_DIR` on private local storage that supports SQLite WAL and file locking. On Termux, use the `com.termux` app's internal private home. Use real, app-owned directories beneath the Android app-data path. The standard `files` wrapper may be `0771` when its owner and group both match the app UID. Other ancestors must remain protected from group and public writes. On POSIX, the server account must own the upload root and its mode should be `0700`. For an existing checkout, run `chmod 700 ./uploads` before starting. On Windows, use a private NTFS ACL for the upload directory and protect its parents from replacement by other users.
+
+Startup validates the upload path and probes directory creation, exclusive file creation, and cleanup before opening SQLite. It checks directory identities again during document operations. Validation and reconciliation errors abort startup before the server listens.
+
+Uploads reserve a private `.UUID.document` directory and create its marker and payload exclusively. The file stays at the same path while it is streamed and validated. The SQLite insert is the publication point. For deletes, SQLite commits the removal first, while the file remains in place. A failed transaction leaves the file available at its original path. Committed flat UUID files from the earlier layout remain readable. Their deletion uses a small exclusive marker with the file's identity so cleanup can detect a replacement.
+
+Before listening, startup removes recognizable, unreferenced reservations left by interrupted uploads or committed deletes. A referenced reservation is retained. For a legacy delete marker, startup checks the file identity and whether a row still refers to it before removing bytes. Unexpected contents, malformed markers, and older `.part`, `.quarantine`, and `.deleted` artifacts are left for manual inspection. This protocol covers process termination under single-instance operation on private local storage. Recovery from power loss also depends on the filesystem and SQLite durability settings.
 
 ## Database
 Migrations live in `src/database/migrations/NNN_name.sql`, run in order, each in a transaction,
