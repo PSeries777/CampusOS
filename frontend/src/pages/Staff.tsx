@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, BookOpen, Plus } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api, useMocks } from '../services';
+import { usersApi, usersQueryKey } from '../users';
 import { dateTime } from '../attendance';
 import type { Course, SessionDetail, User } from '../types';
 import { Empty, ErrorText, PageTitle, Result } from '../ui';
@@ -21,6 +22,12 @@ function CourseEditor({
   close: () => void;
 }) {
   const client = useQueryClient();
+  const users = useQuery({
+    queryKey: usersQueryKey,
+    queryFn: usersApi.list,
+    enabled: admin && !useMocks,
+  });
+  const teachers = users.data?.filter((user) => user.role === 'teacher') ?? [];
   const save = useMutation({
     mutationFn: (form: FormData) =>
       api.saveCourse(
@@ -63,15 +70,31 @@ function CourseEditor({
           defaultValue={course?.title}
         />
       </label>
-      {admin && (
+      {admin && (useMocks ? (
         <label>
           Teacher ID
           <input name="teacher" required defaultValue={course?.teacher_id} />
         </label>
-      )}
+      ) : (
+        <Result query={users}>
+          {() => teachers.length ? (
+            <label>
+              Teacher
+              <select name="teacher" required defaultValue={course?.teacher_id ?? ''}>
+                <option value="">Choose a teacher</option>
+                {teachers.map((teacher) => (
+                  <option key={teacher.id} value={teacher.id}>
+                    {teacher.full_name} ({teacher.email})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : <p className="quiet">Create a teacher account under Users first.</p>}
+        </Result>
+      ))}
       <ErrorText error={save.error} />
       <div className="inline">
-        <button className="primary" disabled={save.isPending}>
+        <button className="primary" disabled={save.isPending || (admin && !useMocks && !teachers.length)}>
           {save.isPending ? 'Saving…' : 'Save course'}
         </button>
         <button type="button" onClick={close}>
@@ -300,8 +323,20 @@ function SessionPanel({
         </div>
         {detail.session.is_active ? (
           <>
-            <h2>Session code</h2>
-            <strong className="big-code">{detail.session.otp_code}</strong>
+            <div className="attendance-summary">
+              <div className="attendance-stat">
+                <h2>Session code</h2>
+                <strong className="big-code">{detail.session.otp_code}</strong>
+              </div>
+              <div
+                className="attendance-stat attendance-present"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <h2>Students present</h2>
+                <strong className="big-code">{detail.present.length}</strong>
+              </div>
+            </div>
             <p>Share this code with students to record their attendance.</p>
             <button
               disabled={busy}

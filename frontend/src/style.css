@@ -438,6 +438,28 @@ progress::-moz-progress-bar {
   letter-spacing: 0.16em;
   line-height: 1.12;
 }
+.attendance-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 0.8rem;
+}
+.attendance-stat {
+  padding: clamp(0.75rem, 2vw, 1.25rem);
+  border-radius: 12px;
+  background: var(--soft);
+}
+.attendance-stat .big-code {
+  display: block;
+  font-size: clamp(2.4rem, 7vw, 4.6rem);
+  letter-spacing: 0.08em;
+}
+.attendance-present {
+  background: var(--good);
+  color: var(--good-ink);
+}
+.attendance-present .big-code {
+  letter-spacing: 0;
+}
 .session-code button,
 .main > button {
   justify-self: start;

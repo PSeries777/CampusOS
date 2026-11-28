@@ -1,28 +1,45 @@
-# SMS Backend
+# CampusOS backend
 
-Self-hosted Student Management System API: Fastify + SQLite (better-sqlite3), designed for
-low-resource hosting (Termux on Android). **Status: Phase 1 of 8** (foundation + schema).
+CampusOS uses Fastify and SQLite to manage accounts, courses, enrollments, attendance, course materials, and individual assessment scores. For the seeded demo, follow the [repository quick start](../README.md#quick-start).
 
-## Architecture
-Routes (endpoints) -> Controllers (HTTP) -> Services (business logic) -> SQLite (parameterized SQL only).
-Config and the DB handle are injected into `buildApp()`, which keeps tests isolated.
+## Project phases
 
-    src/config/      env parsing, SQLite pragmas
-    src/database/    connection, migration runner, migrations/*.sql, seeds
-    src/modules/     one folder per feature (health now; auth, courses, ... later)
-    src/utils/       errors, response envelope, ids, validation patterns
+| Phase | Scope |
+| --- | --- |
+| 1–4 | Backend foundation, authentication, courses and enrollments, and attendance |
+| 5 | Backend course materials, including upload, listing, download, editing, and deletion |
+| 6 | Role-based React user interface |
+| 7 | Integration of the frontend and live API |
+
+This guide covers the current backend, including account provisioning and assessment scores. See the [frontend guide](../frontend/README.md) for the UI and integration.
 
 ## Install and run
-    npm install
-    cp .env.example .env        # set JWT_SECRET before running commands below
-    npm run db:migrate          # optional: server also migrates on startup
-    npm run dev                 # development (auto-restart)
-    npm start                   # production-style
-    npm test
 
-Generate a fresh JWT signing secret with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` and set it as `JWT_SECRET` in `.env` or through your deployment environment. Keep `.env` private. Startup and `npm run db:migrate` require a valid secret. Changing an existing secret invalidates previously issued tokens.
+Use Node.js 24 with npm and run these commands from `backend/`.
 
-The server listens on `127.0.0.1` by default. To allow connections from other machines, explicitly set `HOST` to the intended interface address, or set `HOST=0.0.0.0` to listen on all IPv4 interfaces.
+```powershell
+npm ci
+Copy-Item .env.example .env
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+On macOS or Linux, use `cp .env.example .env`. Put the generated value in `JWT_SECRET` in `.env`. Keep the file private. Changing the signing secret invalidates existing tokens.
+
+Run `npm run db:seed` once on a fresh database to create the first admin. Then run `npm run dev` and check `http://127.0.0.1:8080/api/health`. The server applies pending migrations at startup. Run `npm run db:migrate` to apply them separately, or `npm start` to run without watching for file changes.
+
+### Create the first admin
+
+Run `npm run db:seed` in an interactive terminal after configuring `.env`. The command applies pending migrations and prompts for the admin's name, email, and password. Sign in through the frontend with those credentials, then use **Users** to create teacher and student accounts.
+
+## Architecture and checks
+
+Routes validate requests and check permissions before calling feature services. Services read and write SQLite with parameterized SQL. `buildApp()` accepts configuration and a database handle so tests can run in isolation.
+
+- `src/config/` contains environment parsing and SQLite configuration.
+- `src/database/` contains the connection, migrations, and admin bootstrap command.
+- `src/modules/` contains feature routes and services.
+
+Run `npm test` from `backend/`. The [contributor guide](../CONTRIBUTING.md#run-the-checks) lists frontend and integration checks.
 
 ## Environment variables
 | Name | Default | Notes |
@@ -35,10 +52,20 @@ The server listens on `127.0.0.1` by default. To allow connections from other ma
 | DOCUMENT_UPLOAD_TIMEOUT_MS | 120000 | Upload deadline in milliseconds, 1–900000. Timed-out uploads receive 408. |
 | DOCUMENT_ARCHIVE_MAX_ENTRIES | 1000 | Maximum ZIP or DOCX entries, 1–10000. Larger archives receive 413. |
 | JWT_SECRET | Required | At least 32 random characters in every environment |
-| JWT_EXPIRES_IN | 8h | used from Phase 2 |
+| JWT_EXPIRES_IN | 8h | Token lifetime |
 | LOG_LEVEL | info (prod) / debug | |
 
-### Document requests
+## Course materials (Phase 5)
+
+| Method | Route | Access and purpose |
+| --- | --- | --- |
+| `POST` | `/api/documents` | Course owner or admin uploads a file using multipart form data. |
+| `GET` | `/api/documents?courseId=<id>` | Course owner, admin, or enrolled student lists course materials. |
+| `GET` | `/api/documents/:documentId/download` | Course owner, admin, or enrolled student downloads the file. |
+| `PATCH` | `/api/documents/:documentId` | Course owner or admin edits the title or description. |
+| `DELETE` | `/api/documents/:documentId` | Course owner or admin deletes the document. |
+
+### Requests and storage
 
 Send `courseId` before the file part in `POST /api/documents` so course authorization runs before staging. File-first requests remain supported and receive the same size limit and deadline.
 
@@ -59,15 +86,12 @@ Migrations live in `src/database/migrations/NNN_name.sql`, run in order, each in
 and are tracked in `schema_migrations`. Never edit an applied migration; add a new one.
 Pragmas (WAL, synchronous=NORMAL, foreign_keys=ON, temp_store=MEMORY, busy_timeout=5000) are applied per connection.
 
-## API (Phase 1)
+## API conventions
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | /api/health | none | liveness + DB pragma status |
 
 Response envelope: `{ "success": true, "data": ... }` or `{ "success": false, "error": { "code", "message" } }`.
-
-## Roadmap / later sections
-Authentication, endpoint table, upload configuration, Termux + PM2 + Cloudflare Tunnel notes are added in their phases.
 
 ## Authentication (Phase 2)
 `POST /api/auth/login` with `{ "email", "password" }` returns `{ success, data: { token, user } }`.
@@ -135,3 +159,23 @@ Rules and assumptions (the SRS leaves these open):
 - Percentage = `sessions_attended / total_sessions * 100` (2 decimals). `total_sessions` counts every closed session of the course plus a still-open session only if the student already punched it; 0 sessions gives 0%. Enrollment date is not considered.
 - Manual override = staff add or delete an attendance record (the schema has no status column). Manual records use a synthetic fingerprint `manual:<uuid>` and are flagged `manual: true` in session detail. There is no audit trail of who made the change or why.
 - There is no rate limiting: a 6-digit OTP can be guessed by an enrolled student during an open session.
+
+## Account provisioning
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/users` | Admin lists accounts. |
+| `POST` | `/api/users` | Admin creates a teacher or student with `full_name`, `email`, `password`, and `role`. |
+
+Email addresses are normalized, and duplicate addresses return `409 EMAIL_ALREADY_REGISTERED`. Account responses contain the user's ID, name, email, and role.
+
+## Assessments and marks
+
+| Method | Route | Access and purpose |
+| --- | --- | --- |
+| `GET` | `/api/courses/:courseId/assessments` | Course owner lists assessments. An enrolled student sees only their own scores. |
+| `POST` | `/api/courses/:courseId/assessments` | Course owner creates an assessment with `title` and positive `max_marks`. |
+| `GET` | `/api/courses/:courseId/assessments/:assessmentId/marks` | Course owner views the enrolled roster and saved scores. |
+| `PUT` | `/api/courses/:courseId/assessments/:assessmentId/marks/:studentId` | Course owner saves or updates `marks_obtained` for an enrolled student. |
+
+Scores may range from zero to the assessment maximum. A missing score is returned as `null` and displayed as **Ungraded**.

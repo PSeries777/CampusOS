@@ -40,14 +40,36 @@ export const testAccounts = {
 };
 export const password = 'CampusOS-Local-Test-Only';
 
-export async function createBackend() {
+export async function createBackend({ seed = true } = {}) {
   const { openDatabase } = loadBackend('./src/database/db.js');
   const { runMigrations } = loadBackend('./src/database/migrate.js');
   const { buildApp } = loadBackend('./src/app.js');
-  const { hashPassword } = loadBackend('./src/modules/auth/auth.service.js');
+  const { bootstrapAdmin } = loadBackend('./src/modules/users/users.service.js');
   const uploadDir = await mkdtemp(join(tmpdir(), 'campusos-fixture-'));
   const db = openDatabase(':memory:');
   runMigrations(db);
+  const { accounts, course } = seed ? await seedDemo(db) : {};
+  const app = buildApp({
+    db,
+    config: {
+      nodeEnv: 'test',
+      isProduction: false,
+      logLevel: 'silent',
+      jwtSecret: randomUUID(),
+      jwtExpiresIn: '1h',
+      uploadDir,
+    },
+  });
+  app.addHook('onClose', async () => {
+    db.close();
+    await rm(uploadDir, { recursive: true, force: true });
+  });
+  await app.ready();
+  return { app, accounts, course, bootstrap: (credentials) => bootstrapAdmin(db, credentials) };
+}
+
+async function seedDemo(db) {
+  const { hashPassword } = loadBackend('./src/modules/auth/auth.service.js');
   const hash = await hashPassword(password);
   const accounts = Object.fromEntries(
     Object.entries(testAccounts).map(([key, value]) => [
@@ -75,23 +97,7 @@ export async function createBackend() {
       'INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)',
     ).run(student.id, course);
   }
-  const app = buildApp({
-    db,
-    config: {
-      nodeEnv: 'test',
-      isProduction: false,
-      logLevel: 'silent',
-      jwtSecret: randomUUID(),
-      jwtExpiresIn: '1h',
-      uploadDir,
-    },
-  });
-  app.addHook('onClose', async () => {
-    db.close();
-    await rm(uploadDir, { recursive: true, force: true });
-  });
-  await app.ready();
-  return { app, accounts, course };
+  return { accounts, course };
 }
 
 if (process.argv.includes('--serve')) {

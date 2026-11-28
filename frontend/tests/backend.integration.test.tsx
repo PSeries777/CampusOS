@@ -316,3 +316,160 @@ it('finds a student in the roster, clears selection on course switch, and enroll
     client.clear();
   }
 }, 15000);
+
+it('provisions an empty campus and records a new student check-in through the UI', async () => {
+  const { createBackend, password } = await import(/* @vite-ignore */ fixturePath);
+  await fixture.app.close();
+  const empty = await createBackend({ seed: false });
+  fixture = empty;
+  const admin = 'admin@new-campus.test';
+  const teacher = 'teacher@new-campus.test';
+  const student = 'student@new-campus.test';
+  await empty.bootstrap({ full_name: 'Campus Admin', email: admin, password });
+
+  vi.stubGlobal('matchMedia', () => ({ matches: false }));
+  vi.stubGlobal('scrollTo', () => undefined);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/users']}><App /></MemoryRouter>
+    </QueryClientProvider>,
+  );
+  const fill = (label: string, value: string) => {
+    fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
+  };
+  const button = (name: string) => screen.getByRole('button', { name });
+  const navigate = (name: string) => fireEvent.click(screen.getByRole('link', { name }));
+  async function signIn(email: string) {
+    const submit = await screen.findByRole('button', { name: 'Sign in' });
+    fill('Email', email);
+    fill('Password', password);
+    fireEvent.click(submit);
+    await screen.findByRole('button', { name: 'Sign out' });
+  }
+
+  try {
+    await signIn(admin);
+    await screen.findByRole('heading', { name: 'Create account' });
+    for (const [role, name, email] of [
+      ['teacher', 'New Teacher', teacher],
+      ['student', 'New Student', student],
+    ]) {
+      fill('Full name', name);
+      fill('Email', email);
+      fill('Role', role);
+      fill('Password', password);
+      fireEvent.click(button('Create account'));
+      await screen.findByText('Account created for ' + email + '.');
+    }
+
+    navigate('Courses');
+    fireEvent.click(await screen.findByRole('button', { name: 'New course' }));
+    await screen.findByRole('option', { name: 'New Teacher (' + teacher + ')' });
+    fill('Course code', 'NEW101');
+    fill('Title', 'New Campus Course');
+    const teacherSelect = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Teacher' });
+    fill('Teacher', teacherSelect.options[1].value);
+    fireEvent.click(button('Save course'));
+    await screen.findByRole('heading', { name: 'New Campus Course' });
+
+    fireEvent.click(button('Sign out'));
+    await signIn(teacher);
+    const search = await screen.findByRole('searchbox', { name: 'Find a student' });
+    fireEvent.change(search, { target: { value: student } });
+    fireEvent.click(await screen.findByRole('radio', { name: /New Student/ }));
+    fireEvent.click(button('Enroll student'));
+    await screen.findByRole('button', { name: 'Remove' });
+
+    navigate('Attendance');
+    const start = await screen.findByRole<HTMLButtonElement>('button', { name: 'Start session' });
+    await waitFor(() => expect(start.disabled).toBe(false));
+    fireEvent.click(start);
+    await screen.findByRole('heading', { name: 'Session code' });
+    const code = screen.getByText(/^\d{6}$/).textContent!;
+
+    fireEvent.click(button('Sign out'));
+    await signIn(student);
+    navigate('Overview');
+    const digits = await screen.findByRole('group', { name: 'Six-digit session code' });
+    fireEvent.paste(within(digits).getByRole('textbox', { name: 'Digit 1' }), {
+      clipboardData: { getData: () => code },
+    });
+    fireEvent.click(button('Submit code'));
+    await screen.findByText('Attendance recorded for NEW101.');
+
+    fireEvent.click(button('Sign out'));
+    await signIn(teacher);
+    navigate('Attendance');
+    await screen.findByRole('heading', { name: 'Present · 1' });
+    expect(screen.getByText('New Student')).toBeTruthy();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+}, 20000);
+
+it('saves a mark in the teacher screen and shows only the signed-in student’s result', async () => {
+  const { password } = await import(/* @vite-ignore */ fixturePath);
+  const { accounts } = fixture;
+  vi.stubGlobal('matchMedia', () => ({ matches: false }));
+  vi.stubGlobal('scrollTo', () => undefined);
+
+  async function openMarks(email: string) {
+    saveAuth(await api.login(email, password));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/marks']}><App /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return () => {
+      view.unmount();
+      client.clear();
+    };
+  }
+
+  let close = await openMarks(accounts.teacher.email);
+  try {
+    await screen.findByText('No assessments yet.');
+    const titleInput = screen.getByLabelText<HTMLInputElement>('Assessment title');
+    const maximumInput = screen.getByLabelText<HTMLInputElement>('Maximum score');
+    fireEvent.change(titleInput, { target: { value: '   ' } });
+    expect(titleInput.checkValidity()).toBe(false);
+    fireEvent.change(maximumInput, { target: { value: '0' } });
+    expect(maximumInput.checkValidity()).toBe(false);
+    fireEvent.change(maximumInput, { target: { value: '0.5' } });
+    expect(maximumInput.checkValidity()).toBe(true);
+    fireEvent.change(screen.getByLabelText('Assessment title'), { target: { value: 'Database quiz' } });
+    fireEvent.change(screen.getByLabelText('Maximum score'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+
+    const score = await screen.findByRole('spinbutton', { name: 'Score for Test Student' });
+    const row = score.closest('li');
+    if (!row) throw new Error('Missing student score row');
+    fireEvent.change(score, { target: { value: '0' } });
+    fireEvent.click(within(row).getByRole('button', { name: 'Save score' }));
+    await within(row).findByText('0 / 20');
+    await within(row).findByText('Score saved.');
+
+    close();
+    close = await openMarks(accounts.teacher.email);
+    const saved = await screen.findByRole<HTMLInputElement>('spinbutton', { name: 'Score for Test Student' });
+    expect(saved.value).toBe('0');
+
+    close();
+    close = await openMarks(accounts.student.email);
+    await screen.findByRole('heading', { name: 'Your results' });
+    await screen.findByText('Database quiz');
+    await screen.findByText('0 / 20');
+    expect(screen.queryByText('second@integration.test')).toBeNull();
+
+    close();
+    close = await openMarks(accounts.second.email);
+    await screen.findByText('Database quiz');
+    await screen.findByText('Ungraded');
+    expect(screen.queryByText('0 / 20')).toBeNull();
+  } finally {
+    close();
+  }
+}, 20000);

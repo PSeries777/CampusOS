@@ -1,58 +1,46 @@
 # CampusOS frontend
 
-CampusOS uses React, TypeScript, Tailwind, and Vite. Use Node.js 22.12 or later in the 22.x series, or Node.js 24, with npm.
+The CampusOS web app uses React, TypeScript, Tailwind CSS, and Vite. Phase 6 introduced the role-based interface. Phase 7 connected it to the Fastify API.
 
-## Run the DBMS demo with the real API
+## Workspaces
 
-From `frontend/`, install dependencies and prepare a disposable copy of the backend for testing.
+| Role | Features backed by the API |
+| --- | --- |
+| Admin | Create accounts, assign teachers, manage courses and rosters, and manage course materials. |
+| Teacher | Manage owned courses, find and enroll students, run attendance, upload materials, and record assessment scores. |
+| Student | View enrolled courses, check in with a session code, download materials, and view personal attendance and marks. |
 
-```powershell
-npm ci
-npm run test:prepare
-npm run test:server
-```
+## Requirements
 
-In another terminal, run the frontend and open the URL Vite prints.
+Use Node.js 24 with npm. Run `npm ci` from `frontend/` to install the locked dependencies.
 
-```powershell
-$env:VITE_USE_MOCKS = 'false'
-npm run dev
-```
+## Development with the real API
 
-The test API listens on `127.0.0.1:8080`. Vite forwards `/api` to it. The fixture creates an in-memory SQLite database and seeds CS101 with two students. Restarting the fixture resets it. Backend files in the main checkout are read only for this workflow.
+Follow the [repository quick start](../README.md#quick-start) for a seeded API, or start the [persistent backend](../backend/README.md#install-and-run) and run Vite with `VITE_USE_MOCKS=false`. For the seeded accounts and feature walkthrough, see the [demo guide](../docs/demo.md).
 
-| Role | Email |
-|---|---|
-| Teacher | `teacher@integration.test` |
-| Student | `student@integration.test` |
-| Second student | `second@integration.test` |
-| Admin | `admin@integration.test` |
+### Environment
 
-All four disposable accounts use `CampusOS-Local-Test-Only`.
+| Variable | Purpose |
+| --- | --- |
+| `VITE_USE_MOCKS` | Set to `false` for the real API or `true` for the frontend-only sample. |
+| `API_PROXY_TARGET` | Vite development proxy target for `/api`. Defaults to `http://127.0.0.1:8080`. |
 
-1. Sign in as the teacher and open **Attendance**. Select CS101 and start a session.
-2. Open the site in a second browser profile or private window for the student. Enter the teacher’s code on **Overview**.
-3. Show the student’s attendance percentage and history, then return to the teacher’s live roster. End the session.
-4. Open **Materials** as a teacher or admin to upload, edit, or delete documents. Students can list and download documents from courses they are enrolled in.
-5. Open **Marks** or the admin **Users** tab to view labeled samples. These screens depend on backend features that are not yet available.
-
-Separate browser profiles keep sign-ins independent. If demonstrating both student accounts, give them separate profiles because the API allows one check-in per browser fingerprint per session.
-
-Live enrollment accepts the student UUID through the existing enrollments endpoint. Name and email search requires the Phase 6 student-search endpoint on the deployed backend. Bearer tokens are kept in tab-scoped session storage and cleared on sign-out or expiration. Serve the frontend and same-origin API over HTTPS in production.
-
-To use another backend, set `API_PROXY_TARGET` in `frontend/.env.local` and restart Vite. Production builds use same-origin `/api` URLs.
+Use `.env.local` for local settings and restart Vite after changing them. Production builds use same-origin `/api` URLs. Serve the frontend and API over HTTPS in production. Browser sessions use tab-scoped storage and clear their tokens on sign-out or expiration.
 
 ## Frontend-only demo
 
-Set `VITE_USE_MOCKS=true` in `frontend/.env.local` and restart Vite. The sign-in screen offers demo account buttons. If the current shell already sets `VITE_USE_MOCKS`, clear it or update it as well. Mock attendance is stored in the browser, so switch roles in the same profile to see those changes.
+Set `VITE_USE_MOCKS=true` in `frontend/.env.local` and restart Vite. Update the setting in your shell as well if it already defines `VITE_USE_MOCKS`. The sign-in screen offers demo account buttons. Mock attendance is stored in the browser, so switch roles in the same profile to see those changes.
 
 ## Checks
 
-```powershell
+Run these commands from `frontend/`.
+
+```sh
 npm run lint
 npm test
+npm run test:prepare
 npm run test:integration
 npm run build
 ```
 
-The integration suite uses `tests/.backend/` from `npm run test:prepare`. This folder is ignored by Git. It includes the Fastify source and dependencies used by the tests.
+The integration suite exercises React against the real Fastify API with SQLite. `npm run test:prepare` copies the backend source and installs its dependencies into the ignored `tests/.backend/` directory. See the [contribution guide](../CONTRIBUTING.md#run-the-checks) for the full repository checks.

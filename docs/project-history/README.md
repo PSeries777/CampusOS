@@ -1,13 +1,15 @@
-# CampusOS Project Logs
+# CampusOS project history
 
 This directory contains phase-wise implementation, testing, and verification logs for the CampusOS project.
 
-## Logs
+## Records
 
-- [Frontend changelog](./CHANGELOG.md)
+- [Implementation and verification log](./CHANGELOG.md)
 - [Backend and deployment follow-ups](./OPEN_QUESTIONS.md)
 
 - [Phase 5 — Document Management](./PHASE5_IMPLEMENTATION_LOG.md)
+
+See the [root changelog](../../CHANGELOG.md) for user-facing changes.
 
 ## Naming convention
 
